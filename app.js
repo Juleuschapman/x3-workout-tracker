@@ -157,7 +157,8 @@ function saveSet() {
   const reps = Math.min(999, Math.max(0, parseInt(document.querySelector("#reps").value, 10) || 0));
   const workout = workouts.find(w => w.id === session.workoutId);
   session.sets.push({ exercise: workout.exercises[session.exerciseIndex], bands: [...session.selectedBands], reps, savedAt: new Date().toISOString() });
-  startRest();
+  if (session.exerciseIndex === workout.exercises.length - 1) finishWorkout();
+  else startRest();
 }
 
 function startRest() {
