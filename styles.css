@@ -92,7 +92,7 @@ h3 { font-size: 1.1rem; margin-bottom: 10px; }
 .selected-bands { text-align: center; color: var(--accent); min-height: 24px; font-weight: 700; }
 .reps-control { display: grid; grid-template-columns: 74px 1fr 74px; gap: 12px; align-items: center; margin: 24px 0; }
 .reps-control .btn { height: 74px; font-size: 2rem; padding: 0; }
-.reps-input { width: 100%; border: 0; background: transparent; color: var(--text); text-align: center; font-weight: 900; font-size: clamp(5rem, 25vw, 9rem); line-height: 1; }
+.reps-input { width: 100%; min-width: 0; min-height: 126px; border: 0; background: transparent; color: var(--text); text-align: center; font-weight: 900; font-size: clamp(5rem, 25vw, 9rem); line-height: 1; }
 .reps-input::-webkit-inner-spin-button { display: none; }
 .save-set { min-height: 78px; font-size: 1.25rem; margin-top: auto; }
 

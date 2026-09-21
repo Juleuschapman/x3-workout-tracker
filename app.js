@@ -114,7 +114,7 @@ function renderExercise() {
     <div class="band-grid">${BANDS.map(b => `<button class="btn band" data-band="${b}" aria-pressed="false">${b}</button>`).join("")}</div>
     <div class="reps-control">
       <button class="btn" data-reps="-1" aria-label="Decrease reps">−</button>
-      <input id="reps" class="reps-input" type="number" inputmode="numeric" min="0" max="999" value="10" aria-label="Repetitions">
+      <input id="reps" class="reps-input" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="3" value="10" aria-label="Repetitions">
       <button class="btn" data-reps="1" aria-label="Increase reps">+</button>
     </div>
     <div class="previous-result">
@@ -319,6 +319,15 @@ app.addEventListener("click", e => {
 app.addEventListener("change", e => {
   if (e.target.id === "exerciseSelect") renderProgress(e.target.value);
   if (e.target.id === "importFile") importData(e.target.files?.[0]);
+});
+app.addEventListener("focusin", e => {
+  if (e.target.id === "reps") setTimeout(() => e.target.select(), 0);
+});
+app.addEventListener("pointerup", e => {
+  if (e.target.id === "reps") { e.preventDefault(); e.target.select(); }
+});
+app.addEventListener("input", e => {
+  if (e.target.id === "reps") e.target.value = e.target.value.replace(/\D/g, "").slice(0, 3);
 });
 app.addEventListener("submit", e => { if (e.target.id === "workoutForm") { e.preventDefault(); saveWorkout(e.target); } });
 window.addEventListener("resize", () => { const select = document.querySelector("#exerciseSelect"); if (select) renderProgress(select.value); });
