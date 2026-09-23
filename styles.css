@@ -115,6 +115,10 @@ h3 { font-size: 1.1rem; margin-bottom: 10px; }
 .timer { font-variant-numeric: tabular-nums; font-size: clamp(6rem, 29vw, 11rem); font-weight: 900; line-height: .9; letter-spacing: -.08em; margin: 28px 0 38px; }
 .timer.done { color: var(--accent); }
 .timer-actions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.notification-settings { display: grid; justify-items: center; gap: 6px; margin-top: 22px; }
+.notification-button { min-height: 44px; border: 1px solid var(--line); border-radius: 12px; padding: 9px 13px; background: transparent; color: var(--text); font-size: .82rem; font-weight: 700; cursor: pointer; }
+.notification-button:disabled { color: var(--muted); cursor: default; opacity: .75; }
+.notification-status { color: var(--muted); font-size: .78rem; }
 
 .field { width: 100%; border: 1px solid var(--line); border-radius: 14px; padding: 15px; background: var(--panel); color: var(--text); }
 textarea.field { min-height: 150px; resize: vertical; line-height: 1.5; }

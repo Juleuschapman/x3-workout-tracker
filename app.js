@@ -15,7 +15,9 @@ const app = document.querySelector("#app");
 let workouts = load(KEYS.workouts, SAMPLE_WORKOUTS);
 let history = load(KEYS.history, []);
 let session = null;
-let timer = { remaining: 240, running: false, endAt: null, interval: null };
+let timer = { remaining: 240, running: false, endAt: null, interval: null, completed: false };
+let alertAudioContext = null;
+let serviceWorkerRegistrationPromise = null;
 
 function load(key, fallback) {
   try { return JSON.parse(localStorage.getItem(key)) ?? structuredClone(fallback); }
@@ -28,6 +30,48 @@ function fmtDate(iso) { return new Intl.DateTimeFormat(undefined, { dateStyle: "
 function fmtDuration(ms) { const m = Math.max(1, Math.round(ms / 60000)); return `${m} min`; }
 function header(title, back = "home") { return `<div class="topbar"><button class="btn btn-icon" data-go="${back}" aria-label="Go back">‹</button><h2>${esc(title)}</h2></div>`; }
 function toast(message) { const el = document.createElement("div"); el.className = "toast"; el.textContent = message; document.body.append(el); setTimeout(() => el.remove(), 1800); }
+
+function getNotificationStatus() {
+  if (!("Notification" in window) || !("serviceWorker" in navigator)) return { label: "Notifications Unavailable", canRequest: false };
+  if (Notification.permission === "granted") return { label: "Notifications Enabled", canRequest: false };
+  if (Notification.permission === "denied") return { label: "Permission Denied", canRequest: false };
+  return { label: "Notifications Disabled", canRequest: true };
+}
+
+function notificationControls() {
+  const status = getNotificationStatus();
+  return `<div class="notification-settings">
+    <button class="notification-button" data-action="enable-notifications" ${status.canRequest ? "" : "disabled"}>Enable Workout Notifications</button>
+    <span class="notification-status" id="notificationStatus">${status.label}</span>
+  </div>`;
+}
+
+function refreshNotificationStatus() {
+  const status = getNotificationStatus();
+  const label = document.querySelector("#notificationStatus");
+  const button = document.querySelector('[data-action="enable-notifications"]');
+  if (label) label.textContent = status.label;
+  if (button) button.disabled = !status.canRequest;
+}
+
+async function enableWorkoutNotifications() {
+  if (!("Notification" in window) || !("serviceWorker" in navigator)) {
+    toast("Notifications unavailable on this device");
+    return;
+  }
+  if (Notification.permission === "granted" || Notification.permission === "denied") {
+    refreshNotificationStatus();
+    return;
+  }
+  try {
+    const permission = await Notification.requestPermission();
+    refreshNotificationStatus();
+    toast(permission === "granted" ? "Workout notifications enabled" : "Notification permission denied");
+  } catch {
+    refreshNotificationStatus();
+    toast("Notifications unavailable on this device");
+  }
+}
 
 function renderHome() {
   stopTimerLoop();
@@ -162,7 +206,9 @@ function saveSet() {
 }
 
 function startRest() {
-  timer.remaining = 240; timer.running = true; timer.endAt = Date.now() + 240000;
+  primeAlertSound();
+  clearTimerNotification();
+  timer.remaining = 240; timer.running = true; timer.endAt = Date.now() + 240000; timer.completed = false;
   renderTimer(); startTimerLoop();
 }
 function renderTimer() {
@@ -177,34 +223,109 @@ function renderTimer() {
       <button class="btn" data-action="reset-timer">Reset</button>
       <button class="btn" data-action="skip">Skip</button>
     </div>`}
+    ${notificationControls()}
   </section>`;
 }
 function startTimerLoop() {
   stopTimerLoop();
-  timer.interval = setInterval(() => {
-    if (!timer.running) return;
-    timer.remaining = Math.max(0, Math.ceil((timer.endAt - Date.now()) / 1000));
-    const display = document.querySelector("#timerDisplay");
-    if (display) display.textContent = `${Math.floor(timer.remaining / 60)}:${String(timer.remaining % 60).padStart(2, "0")}`;
-    if (timer.remaining === 0) { timer.running = false; stopTimerLoop(); alertUser(); renderTimer(); }
-  }, 250);
+  syncTimerFromClock();
+  if (timer.running) timer.interval = setInterval(syncTimerFromClock, 250);
 }
 function stopTimerLoop() { if (timer.interval) clearInterval(timer.interval); timer.interval = null; }
+function syncTimerFromClock() {
+  if (!timer.running || !timer.endAt || timer.completed) return;
+  timer.remaining = Math.max(0, Math.ceil((timer.endAt - Date.now()) / 1000));
+  if (timer.remaining === 0) { completeTimer(); return; }
+  const display = document.querySelector("#timerDisplay");
+  if (display) display.textContent = `${Math.floor(timer.remaining / 60)}:${String(timer.remaining % 60).padStart(2, "0")}`;
+}
+function completeTimer() {
+  if (timer.completed) return;
+  timer.completed = true; timer.running = false; timer.remaining = 0; timer.endAt = null;
+  stopTimerLoop();
+  renderTimer();
+  alertUser();
+  showTimerNotification();
+}
 function pauseTimer() {
-  if (timer.running) { timer.remaining = Math.max(0, Math.ceil((timer.endAt - Date.now()) / 1000)); timer.running = false; stopTimerLoop(); }
-  else { timer.running = true; timer.endAt = Date.now() + timer.remaining * 1000; startTimerLoop(); }
+  if (timer.running) {
+    syncTimerFromClock();
+    if (timer.completed) return;
+    timer.running = false; timer.endAt = null; stopTimerLoop();
+  } else if (timer.remaining > 0 && !timer.completed) {
+    primeAlertSound();
+    timer.running = true; timer.endAt = Date.now() + timer.remaining * 1000; startTimerLoop();
+  }
   renderTimer();
 }
-function resetTimer() { timer.remaining = 240; timer.running = true; timer.endAt = Date.now() + 240000; renderTimer(); startTimerLoop(); }
-function skipTimer() { timer.remaining = 0; timer.running = false; stopTimerLoop(); renderTimer(); }
-function alertUser() {
-  if (navigator.vibrate) navigator.vibrate([250, 100, 250]);
+function resetTimer() {
+  primeAlertSound();
+  clearTimerNotification();
+  timer.remaining = 240; timer.running = true; timer.endAt = Date.now() + 240000; timer.completed = false;
+  renderTimer(); startTimerLoop();
+}
+function skipTimer() {
+  timer.remaining = 0; timer.running = false; timer.endAt = null; timer.completed = true;
+  stopTimerLoop(); clearTimerNotification(); renderTimer();
+}
+function primeAlertSound() {
   try {
-    const ctx = new (window.AudioContext || window.webkitAudioContext)();
-    const oscillator = ctx.createOscillator(); const gain = ctx.createGain();
-    oscillator.connect(gain); gain.connect(ctx.destination); oscillator.frequency.value = 880; gain.gain.value = .12;
-    oscillator.start(); oscillator.stop(ctx.currentTime + .45);
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextClass) return;
+    if (!alertAudioContext) alertAudioContext = new AudioContextClass();
+    if (alertAudioContext.state === "suspended") alertAudioContext.resume();
+  } catch { /* Sound remains a best-effort browser feature. */ }
+}
+function alertUser() {
+  if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+  try {
+    primeAlertSound();
+    if (!alertAudioContext) return;
+    const oscillator = alertAudioContext.createOscillator(); const gain = alertAudioContext.createGain();
+    oscillator.connect(gain); gain.connect(alertAudioContext.destination); oscillator.frequency.value = 880; gain.gain.value = .12;
+    oscillator.start(); oscillator.stop(alertAudioContext.currentTime + .45);
   } catch { /* Browser blocked audio; vibration may still work. */ }
+}
+
+function getNextExerciseName() {
+  const workout = session && workouts.find(w => w.id === session.workoutId);
+  return workout?.exercises?.[session.exerciseIndex + 1] || null;
+}
+
+async function getServiceWorkerRegistration() {
+  if (!("serviceWorker" in navigator) || location.protocol === "file:") return null;
+  if (!serviceWorkerRegistrationPromise) {
+    serviceWorkerRegistrationPromise = navigator.serviceWorker.register("./service-worker.js").then(() => navigator.serviceWorker.ready);
+  }
+  try { return await serviceWorkerRegistrationPromise; }
+  catch { return null; }
+}
+
+async function showTimerNotification() {
+  if (!("Notification" in window) || Notification.permission !== "granted") return;
+  const registration = await getServiceWorkerRegistration();
+  if (!registration?.showNotification) return;
+  const nextExercise = getNextExerciseName();
+  const body = nextExercise ? `Rest over — time for ${nextExercise}.` : "Rest over — next set!";
+  try {
+    await registration.showNotification("X3 Rest Timer", {
+      body,
+      icon: "./icons/icon-192.png",
+      badge: "./icons/icon-192.png",
+      tag: "x3-rest-timer",
+      renotify: false,
+      data: { url: "./#active-timer" }
+    });
+  } catch { /* The in-app alert remains available as a fallback. */ }
+}
+
+async function clearTimerNotification() {
+  const registration = await getServiceWorkerRegistration();
+  if (!registration?.getNotifications) return;
+  try {
+    const notifications = await registration.getNotifications({ tag: "x3-rest-timer" });
+    notifications.forEach(notification => notification.close());
+  } catch { /* Notification cleanup is best effort. */ }
 }
 
 function nextExercise() {
@@ -312,6 +433,7 @@ app.addEventListener("click", e => {
   if (target.dataset.deleteWorkout) deleteWorkout(target.dataset.deleteWorkout);
   const action = target.dataset.action;
   if (action === "save-set") saveSet(); if (action === "pause") pauseTimer(); if (action === "reset-timer") resetTimer(); if (action === "skip") skipTimer();
+  if (action === "enable-notifications") enableWorkoutNotifications();
   if (action === "next") nextExercise(); if (action === "cancel") cancelWorkout(); if (action === "add-workout") editWorkout(null);
   if (action === "export-data") exportData();
   if (action === "choose-import") document.querySelector("#importFile")?.click();
@@ -331,9 +453,19 @@ app.addEventListener("input", e => {
 });
 app.addEventListener("submit", e => { if (e.target.id === "workoutForm") { e.preventDefault(); saveWorkout(e.target); } });
 window.addEventListener("resize", () => { const select = document.querySelector("#exerciseSelect"); if (select) renderProgress(select.value); });
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) { syncTimerFromClock(); refreshNotificationStatus(); }
+});
+window.addEventListener("pageshow", () => { syncTimerFromClock(); refreshNotificationStatus(); });
+window.addEventListener("focus", () => { syncTimerFromClock(); refreshNotificationStatus(); });
 
 renderHome();
 
 if ("serviceWorker" in navigator && location.protocol !== "file:") {
-  window.addEventListener("load", () => navigator.serviceWorker.register("./service-worker.js").catch(() => {}));
+  window.addEventListener("load", () => { getServiceWorkerRegistration(); });
+  navigator.serviceWorker.addEventListener("message", event => {
+    if (event.data?.type !== "OPEN_ACTIVE_TIMER" || !session) return;
+    syncTimerFromClock();
+    if (timer.running || timer.completed) renderTimer();
+  });
 }

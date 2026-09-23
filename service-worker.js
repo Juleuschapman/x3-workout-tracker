@@ -1,4 +1,4 @@
-const CACHE_NAME = "x3-workout-tracker-v5";
+const CACHE_NAME = "x3-workout-tracker-v6";
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -33,4 +33,20 @@ self.addEventListener("fetch", event => {
       return response;
     }).catch(() => caches.match("./index.html")))
   );
+});
+
+self.addEventListener("notificationclick", event => {
+  event.notification.close();
+  const targetUrl = new URL(event.notification.data?.url || "./", self.registration.scope).href;
+  event.waitUntil((async () => {
+    const windowClients = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+    for (const client of windowClients) {
+      if (new URL(client.url).origin === self.location.origin && "focus" in client) {
+        await client.focus();
+        client.postMessage({ type: "OPEN_ACTIVE_TIMER" });
+        return;
+      }
+    }
+    if (self.clients.openWindow) await self.clients.openWindow(targetUrl);
+  })());
 });
